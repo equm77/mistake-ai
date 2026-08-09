@@ -1,26 +1,20 @@
 // ==========================================
-// 1. 全局配置 (Configuration)
+// 1. 本地存儲設定
 // ==========================================
-const GEMINI_API_KEY = "AQ.Ab8RN6JwabaP6YCYFvXPyHMCcQrV9W504ZZDlNn0rMcQ0Iaeuw";
-
-// 本地存儲 key
 const STORAGE_KEY = "mistake_ai_data";
-
-// ==========================================
-// 2. 狀態管理 (State Management)
-// ==========================================
 let mistakes = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
 
 // ==========================================
-// 3. 頁面初始化與事件監聽
+// 2. 頁面初始化
 // ==========================================
 document.addEventListener("DOMContentLoaded", () => {
     initNavigation();
     renderHomeStats();
+    renderMistakesList();
     setupFormListeners();
 });
 
-// 導覽列切換
+// 導覽列頁面切換
 function initNavigation() {
     const navItems = document.querySelectorAll("nav a, .nav-item");
     navItems.forEach(item => {
@@ -36,6 +30,7 @@ function initNavigation() {
 }
 
 function showSection(sectionId) {
+    if (!sectionId) return;
     const sections = document.querySelectorAll("section, .page-section");
     sections.forEach(sec => {
         if (sec.id === sectionId) {
@@ -54,47 +49,87 @@ function renderHomeStats() {
     }
 }
 
+// 渲染已儲存的錯題列表
+function renderMistakesList() {
+    const listContainer = document.getElementById("mistakes-list");
+    if (!listContainer) return;
+
+    listContainer.innerHTML = "";
+
+    if (mistakes.length === 0) {
+        listContainer.innerHTML = "<p style='text-align:center; color:#888;'>目前還沒有儲存任何照片。</p >";
+        return;
+    }
+
+    mistakes.forEach((item, index) => {
+        const card = document.createElement("div");
+        card.className = "mistake-card";
+        card.style.cssText = "background:#fff; padding:12px; margin-bottom:12px; border-radius:8px; border:1px solid #ddd;";
+        card.innerHTML = `
+            <div style="font-size:12px; color:#666; margin-bottom:6px;">科目：${item.subject} | 時間：${item.date}</div>
+            < img src="${item.image}" style="max-width:100%; border-radius:6px; display:block; margin-bottom:8px;">
+            <button onclick="deleteMistake(${index})" style="background:#ef4444; color:#fff; border:none; padding:4px 8px; border-radius:4px; font-size:12px; cursor:pointer;">刪除照片</button>
+        `;
+        listContainer.appendChild(card);
+    });
+}
+
+// 刪除紀錄
+function deleteMistake(index) {
+    mistakes.splice(index, 1);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(mistakes));
+    renderHomeStats();
+    renderMistakesList();
+}
+
 // ==========================================
-// 4. 表單與 AI 分析邏輯
+// 3. 上傳與儲存照片邏輯
 // ==========================================
 function setupFormListeners() {
-    const form = document.getElementById("add-mistake-form");
-    const imageInput = document.getElementById("image-input");
-    const analyzeBtn = document.getElementById("analyze-btn");
+    const saveBtn = document.getElementById("analyze-btn") || document.querySelector("button.analyze-btn");
+    const imageInput = document.getElementById("image-input") || document.querySelector("input[type='file']");
+    const subjectSelect = document.getElementById("subject-select") || document.querySelector("select");
 
-    if (analyzeBtn) {
-        analyzeBtn.addEventListener("click", async () => {
+    if (saveBtn) {
+        // 修改按鈕顯示文字
+        saveBtn.innerText = "儲存照片";
+
+        saveBtn.addEventListener("click", async (e) => {
+            e.preventDefault();
+
             const file = imageInput?.files[0];
             if (!file) {
-                alert("請先選擇或拍攝一張錯題照片！");
+                alert("請先選擇或拍攝一張照片！");
                 return;
             }
 
-            // 顯示載入狀態
-            analyzeBtn.disabled = true;
-            analyzeBtn.innerText = "AI 分析中，請稍候...";
-
             try {
-                // 將圖片轉換為 Base64
-                const base64Data = await convertFileToBase64(file);
-                
-                // 直接呼叫 Gemini API
-                const analysisResult = await callGeminiAPI(base64Data, file.type);
+                // 將圖片轉為 Base64 字串儲存
+                const imageBase64 = await convertFileToBase64(file);
+                const selectedSubject = subjectSelect ? subjectSelect.value : "General";
 
-                // 顯示結果
-                const resultBox = document.getElementById("analysis-result");
-                if (resultBox) {
-                    resultBox.innerText = analysisResult;
-                    resultBox.style.display = "block";
-                }
+                // 新增至本地紀錄
+                const newRecord = {
+                    id: Date.now(),
+                    subject: selectedSubject,
+                    image: imageBase64,
+                    date: new Date().toLocaleDateString()
+                };
 
-                alert("分析成功！");
+                mistakes.unshift(newRecord);
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(mistakes));
+
+                // 更新頁面狀態
+                renderHomeStats();
+                renderMistakesList();
+
+                // 清空輸入
+                if (imageInput) imageInput.value = "";
+
+                alert("照片已成功儲存！");
             } catch (error) {
-                console.error("Analysis Error:", error);
-                alert("分析失敗：" + error.message);
-            } finally {
-                analyzeBtn.disabled = false;
-                analyzeBtn.innerText = "Analyze Mistake";
+                console.error("Save Error:", error);
+                alert("儲存失敗，可能照片檔案過大。");
             }
         });
     }
@@ -108,52 +143,4 @@ function convertFileToBase64(file) {
         reader.onload = () => resolve(reader.result);
         reader.onerror = error => reject(error);
     });
-}
-
-// ==========================================
-// 5. 直接呼叫 Gemini API (Direct Frontend Call)
-// ==========================================
-async function callGeminiAPI(base64ImageWithHeader, mimeType) {
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY_HERE") {
-        throw new Error("請先在 app.js 中填入有效的 GEMINI_API_KEY！");
-    }
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-    
-    // 提取純 Base64 字串
-    const base64Data = base64ImageWithHeader.split(",")[1];
-
-    const promptText = "你是一位精通 HKDSE 的專業導師。請分析這張錯題照片，輸出格式如下：\n1. 題目考點分析\n2. 正確答案與詳細解題步驟\n3. 學生常見錯誤原因提示";
-
-    const requestBody = {
-        contents: [
-            {
-                parts: [
-                    { text: promptText },
-                    {
-                        inline_data: {
-                            mime_type: mimeType || "image/jpeg",
-                            data: base64Data
-                        }
-                    }
-                ]
-            }
-        ]
-    };
-
-    const response = await fetch(url, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify(requestBody)
-    });
-
-    if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || "網路請求失敗");
-    }
-
-    const data = await response.json();
-    return data.candidates[0].content.parts[0].text;
 }
