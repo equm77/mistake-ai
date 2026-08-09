@@ -1,278 +1,159 @@
-let store = JSON.parse(localStorage.getItem('mistake_ai_db')) || {
-  mistakes: [],
-  settings: { language: 'auto', target: 5 }
-};
+// ==========================================
+// 1. 全局配置 (Configuration)
+// ==========================================
+const GEMINI_API_KEY = "AQ.Ab8RN6JwabaP6YCYFvXPyHMCcQrV9W504ZZDlNn0rMcQ0Iaeuw";
 
-let currentSelectedFile = null;
-let currentVerificationData = null;
-let currentAnalysisResult = null;
+// 本地存儲 key
+const STORAGE_KEY = "mistake_ai_data";
 
-function saveStore() {
-  localStorage.setItem('mistake_ai_db', JSON.stringify(store));
-  updateStats();
+// ==========================================
+// 2. 狀態管理 (State Management)
+// ==========================================
+let mistakes = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+
+// ==========================================
+// 3. 頁面初始化與事件監聽
+// ==========================================
+document.addEventListener("DOMContentLoaded", () => {
+    initNavigation();
+    renderHomeStats();
+    setupFormListeners();
+});
+
+// 導覽列切換
+function initNavigation() {
+    const navItems = document.querySelectorAll("nav a, .nav-item");
+    navItems.forEach(item => {
+        item.addEventListener("click", (e) => {
+            e.preventDefault();
+            const targetId = item.getAttribute("href")?.replace("#", "") || item.dataset.target;
+            showSection(targetId);
+            
+            navItems.forEach(nav => nav.classList.remove("active"));
+            item.classList.add("active");
+        });
+    });
 }
 
-function navTo(viewId) {
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  
-  document.getElementById(`view-${viewId}`).classList.add('active');
-  const activeNav = document.getElementById(`nav-${viewId}`);
-  if (activeNav) activeNav.classList.add('active');
-
-  if (viewId === 'mistakes') renderLibrary();
-  if (viewId === 'review') renderReview();
-  if (viewId === 'progress') renderProgress();
+function showSection(sectionId) {
+    const sections = document.querySelectorAll("section, .page-section");
+    sections.forEach(sec => {
+        if (sec.id === sectionId) {
+            sec.style.display = "block";
+        } else {
+            sec.style.display = "none";
+        }
+    });
 }
 
-function handleFileSelect(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  currentSelectedFile = file;
-  const reader = new FileReader();
-  reader.onload = function(e) {
-    document.getElementById('image-preview').src = e.target.result;
-    document.getElementById('image-preview-container').classList.remove('hidden');
-    const btn = document.getElementById('btn-recognize');
-    btn.classList.remove('disabled');
-    btn.disabled = false;
-  };
-  reader.readAsDataURL(file);
+// 渲染首頁數據
+function renderHomeStats() {
+    const totalElement = document.getElementById("total-count");
+    if (totalElement) {
+        totalElement.innerText = mistakes.length;
+    }
 }
 
-async function startRecognition() {
-  if (!currentSelectedFile) return;
+// ==========================================
+// 4. 表單與 AI 分析邏輯
+// ==========================================
+function setupFormListeners() {
+    const form = document.getElementById("add-mistake-form");
+    const imageInput = document.getElementById("image-input");
+    const analyzeBtn = document.getElementById("analyze-btn");
 
-  showLoading('Reading question from image...');
-  const formData = new FormData();
-  formData.append('image', currentSelectedFile);
-  formData.append('subject', document.getElementById('subject-select').value);
+    if (analyzeBtn) {
+        analyzeBtn.addEventListener("click", async () => {
+            const file = imageInput?.files[0];
+            if (!file) {
+                alert("請先選擇或拍攝一張錯題照片！");
+                return;
+            }
 
-  try {
-    const res = await fetch('/api/recognize', { method: 'POST', body: formData });
-    const data = await res.json();
-    hideLoading();
+            // 顯示載入狀態
+            analyzeBtn.disabled = true;
+            analyzeBtn.innerText = "AI 分析中，請稍候...";
 
-    if (!data.is_clear) {
-      alert(data.unclear_message || 'The image is unclear. Please retake the photo with better lighting.');
-      return;
+            try {
+                // 將圖片轉換為 Base64
+                const base64Data = await convertFileToBase64(file);
+                
+                // 直接呼叫 Gemini API
+                const analysisResult = await callGeminiAPI(base64Data, file.type);
+
+                // 顯示結果
+                const resultBox = document.getElementById("analysis-result");
+                if (resultBox) {
+                    resultBox.innerText = analysisResult;
+                    resultBox.style.display = "block";
+                }
+
+                alert("分析成功！");
+            } catch (error) {
+                console.error("Analysis Error:", error);
+                alert("分析失敗：" + error.message);
+            } finally {
+                analyzeBtn.disabled = false;
+                analyzeBtn.innerText = "Analyze Mistake";
+            }
+        });
+    }
+}
+
+// 工具函數：檔案轉 Base64
+function convertFileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+    });
+}
+
+// ==========================================
+// 5. 直接呼叫 Gemini API (Direct Frontend Call)
+// ==========================================
+async function callGeminiAPI(base64ImageWithHeader, mimeType) {
+    if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY_HERE") {
+        throw new Error("請先在 app.js 中填入有效的 GEMINI_API_KEY！");
     }
 
-    currentVerificationData = data;
-    document.getElementById('verify-img').src = document.getElementById('image-preview').src;
-    document.getElementById('detected-text').textContent = data.detected_question;
-    document.getElementById('verification-step').classList.remove('hidden');
-    document.getElementById('upload-form').classList.add('hidden');
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    
+    // 提取純 Base64 字串
+    const base64Data = base64ImageWithHeader.split(",")[1];
 
-  } catch (err) {
-    hideLoading();
-    alert('Error connecting to server. Please try again.');
-  }
-}
+    const promptText = "你是一位精通 HKDSE 的專業導師。請分析這張錯題照片，輸出格式如下：\n1. 題目考點分析\n2. 正確答案與詳細解題步驟\n3. 學生常見錯誤原因提示";
 
-function resetUpload() {
-  currentSelectedFile = null;
-  currentVerificationData = null;
-  document.getElementById('upload-form').classList.remove('hidden');
-  document.getElementById('verification-step').classList.add('hidden');
-  document.getElementById('image-preview-container').classList.add('hidden');
-  document.getElementById('btn-recognize').classList.add('disabled');
-  document.getElementById('btn-recognize').disabled = true;
-}
+    const requestBody = {
+        contents: [
+            {
+                parts: [
+                    { text: promptText },
+                    {
+                        inline_data: {
+                            mime_type: mimeType || "image/jpeg",
+                            data: base64Data
+                        }
+                    }
+                ]
+            }
+        ]
+    };
 
-async function proceedToFullAnalysis() {
-  showLoading('Analyzing mistake patterns & solution strategy...');
-  
-  const formData = new FormData();
-  formData.append('image', currentSelectedFile);
-  formData.append('languageSetting', store.settings.language);
-  formData.append('confirmedQuestion', currentVerificationData.detected_question);
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(requestBody)
+    });
 
-  try {
-    const res = await fetch('/api/analyze', { method: 'POST', body: formData });
-    const data = await res.json();
-    hideLoading();
-
-    currentAnalysisResult = data;
-    document.getElementById('verification-step').classList.add('hidden');
-
-    const resultBox = document.getElementById('analysis-content');
-    resultBox.innerHTML = `
-      <p><strong>Subject:</strong> ${data.subject || currentVerificationData.detected_subject}</p>
-      <p><strong>Topic:</strong> ${data.topic}</p>
-      <p><strong>Original Question:</strong> ${data.question_text}</p>
-      <p><strong>Student Working:</strong> ${data.student_work || 'None visible'}</p>
-      <p><strong>Correct Answer:</strong> ${data.correct_answer}</p>
-      <p><strong>Why You Got It Wrong:</strong> ${data.why_wrong}</p>
-      <p><strong>Key Knowledge:</strong> ${data.key_knowledge}</p>
-      <p><strong>Solving Strategy:</strong> ${data.solving_strategy}</p>
-      <p><strong>Common Trap:</strong> ${data.common_trap}</p>
-    `;
-
-    document.getElementById('analysis-result').classList.remove('hidden');
-
-  } catch (err) {
-    hideLoading();
-    alert('Analysis failed. Please try again.');
-  }
-}
-
-function saveCurrentMistake() {
-  const newMistake = {
-    id: Date.now().toString(),
-    imageData: document.getElementById('image-preview').src,
-    analysis: currentAnalysisResult,
-    subject: currentAnalysisResult.subject || currentVerificationData.detected_subject,
-    topic: currentAnalysisResult.topic,
-    dateAdded: new Date().toISOString(),
-    status: 'New',
-    nextReviewDate: new Date().toISOString(),
-    intervalDays: 1
-  };
-
-  store.mistakes.push(newMistake);
-  saveStore();
-
-  alert('Mistake saved successfully!');
-  resetUpload();
-  document.getElementById('analysis-result').classList.add('hidden');
-  navTo('mistakes');
-}
-
-function renderLibrary() {
-  const container = document.getElementById('library-list');
-  const subFilter = document.getElementById('filter-subject').value;
-  const statusFilter = document.getElementById('filter-status').value;
-
-  const filtered = store.mistakes.filter(m => {
-    const matchSub = subFilter === 'All' || m.subject === subFilter;
-    const matchStatus = statusFilter === 'All' || m.status === statusFilter;
-    return matchSub && matchStatus;
-  });
-
-  if (filtered.length === 0) {
-    container.innerHTML = '<p style="text-align:center; padding: 20px;">No mistakes found matching filters.</p>';
-    return;
-  }
-
-  container.innerHTML = filtered.map(m => `
-    <div class="card">
-      <div style="display:flex; justify-content:space-between;">
-        <strong>${m.subject} - ${m.topic}</strong>
-        <span class="sub-tag">${m.status}</span>
-      </div>
-      <p style="margin:8px 0; font-size:14px;">${m.analysis.question_text}</p>
-      <button class="secondary-btn" style="width:100%" onclick="alert('${m.analysis.why_wrong.replace(/'/g, "\\'")}')">View Why Wrong</button>
-    </div>
-  `).join('');
-}
-
-function renderReview() {
-  const container = document.getElementById('review-container');
-  const now = new Date();
-  
-  const due = store.mistakes.filter(m => new Date(m.nextReviewDate) <= now && m.status !== 'Mastered');
-
-  if (due.length === 0) {
-    container.innerHTML = '<div class="card"><h3>All caught up! 🎉</h3><p>No questions due for review today.</p></div>';
-    return;
-  }
-
-  const current = due[0];
-  container.innerHTML = `
-    <div class="card">
-      <h3>Review Question</h3>
-      <div class="img-preview-small"><img src="${current.imageData}" alt="Question"></div>
-      <p><strong>Question:</strong> ${current.analysis.question_text}</p>
-      
-      <div id="review-answer-box" class="hidden" style="margin-top:12px; border-top:1px solid #ccc; padding-top:8px;">
-        <p><strong>Correct Answer:</strong> ${current.analysis.correct_answer}</p>
-        <p><strong>Key Explanation:</strong> ${current.analysis.why_wrong}</p>
-      </div>
-
-      <div style="margin-top:16px;">
-        <button class="secondary-btn" style="width:100%; margin-bottom:8px;" onclick="document.getElementById('review-answer-box').classList.remove('hidden')">Show Explanation</button>
-        <div class="btn-row">
-          <button class="primary-btn" onclick="processReview('${current.id}', true)">I Got It</button>
-          <button class="danger-btn" onclick="processReview('${current.id}', false)">Still Don't Understand</button>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function processReview(id, success) {
-  const item = store.mistakes.find(m => m.id === id);
-  if (!item) return;
-
-  if (success) {
-    item.intervalDays *= 2;
-    if (item.intervalDays >= 14) {
-      item.status = 'Mastered';
-    } else {
-      item.status = 'Reviewing';
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || "網路請求失敗");
     }
-  } else {
-    item.intervalDays = 1;
-    item.status = 'Reviewing';
-  }
 
-  const nextDate = new Date();
-  nextDate.setDate(nextDate.getDate() + item.intervalDays);
-  item.nextReviewDate = nextDate.toISOString();
-
-  saveStore();
-  renderReview();
+    const data = await response.json();
+    return data.candidates[0].content.parts[0].text;
 }
-
-function updateStats() {
-  document.getElementById('stat-total').textContent = store.mistakes.length;
-  
-  const now = new Date();
-  const dueCount = store.mistakes.filter(m => new Date(m.nextReviewDate) <= now && m.status !== 'Mastered').length;
-  document.getElementById('stat-review').textContent = dueCount;
-  
-  const masteredCount = store.mistakes.filter(m => m.status === 'Mastered').length;
-  document.getElementById('stat-mastered').textContent = masteredCount;
-
-  const reasons = store.mistakes.map(m => m.analysis.common_trap).filter(Boolean);
-  const commonBox = document.getElementById('common-mistakes-list');
-  if (reasons.length > 0) {
-    commonBox.innerHTML = Array.from(new Set(reasons)).slice(0, 5).map(r => `<li>${r}</li>`).join('');
-  }
-}
-
-function renderProgress() {
-  const topicsMap = {};
-  store.mistakes.forEach(m => {
-    topicsMap[m.topic] = (topicsMap[m.topic] || 0) + 1;
-  });
-
-  const sortedTopics = Object.entries(topicsMap).sort((a, b) => b[1] - a[1]);
-  const list = document.getElementById('weakest-topics-list');
-  
-  if (sortedTopics.length === 0) {
-    list.innerHTML = '<li>No data available yet.</li>';
-    return;
-  }
-
-  list.innerHTML = sortedTopics.map(([topic, count]) => `<li><strong>${topic}:</strong> ${count} mistakes recorded</li>`).join('');
-}
-
-function updateSettings() {
-  store.settings.language = document.getElementById('setting-language').value;
-  store.settings.target = document.getElementById('setting-target').value;
-  saveStore();
-}
-
-function showLoading(msg) {
-  document.getElementById('loading-text').textContent = msg;
-  document.getElementById('loading-overlay').classList.remove('hidden');
-}
-
-function hideLoading() {
-  document.getElementById('loading-overlay').classList.add('hidden');
-}
-
-updateStats();
