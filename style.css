@@ -52,3 +52,39 @@ select, input { width: 100%; padding: 10px; border-radius: 8px; border: 1px soli
 .btn-row { display: flex; gap: 8px; }
 .badge-list { list-style: none; }
 .badge-list li { background: #e0e7ff; color: #3730a3; padding: 6px 12px; border-radius: 20px; display: inline-block; margin: 4px 4px 4px 0; font-size: 12px; }
+/* 修正底部導覽列定位與排版 */
+nav, .bottom-nav {
+  position: fixed !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 60px !important;
+  background-color: #ffffff !important;
+  border-top: 1px solid #e5e7eb !important;
+  display: flex !important;
+  justify-content: space-around !important;
+  align-items: center !important;
+  z-index: 1000 !important;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* 修正導覽列按鈕與圖標間距 */
+nav a, nav button, .nav-item {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-decoration: none !important;
+  color: #6b7280 !important;
+  font-size: 12px !important;
+  gap: 4px !important;
+}
+
+nav a.active, nav button.active, .nav-item.active {
+  color: #2563eb !important;
+}
+
+/* 避免頁面最底部內容被固定導覽列擋住 */
+body {
+  padding-bottom: 70px !important;
+}
